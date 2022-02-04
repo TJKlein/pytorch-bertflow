@@ -141,57 +141,7 @@ if __name__ == '__main__':
             num_proc=FLAGS.preprocessing_num_workers,
             remove_columns=column_names,
             load_from_cache_file=not FLAGS.overwrite_cache,
-        )
-    
-    
-     # Data collator
-    @dataclass
-    class OurDataCollatorWithPadding:
-
-        tokenizer: PreTrainedTokenizerBase
-        padding: Union[bool, str, PaddingStrategy] = True
-        max_length: Optional[int] = None
-        pad_to_multiple_of: Optional[int] = None
-        mlm: bool = True
-        mlm_probability: float = data_args.mlm_probability
-
-        def __call__(self, features: List[Dict[str, Union[List[int], List[List[int]], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-            special_keys = ['input_ids', 'attention_mask', 'token_type_ids', 'mlm_input_ids', 'mlm_labels']
-            bs = len(features)
-            if bs > 0:
-                num_sent = len(features[0]['input_ids'])
-            else:
-                return
-            flat_features = []
-            for feature in features:
-                for i in range(num_sent):
-                    flat_features.append({k: feature[k][i] if k in special_keys else feature[k] for k in feature})
-
-            batch = self.tokenizer.pad(
-                flat_features,
-                padding=self.padding,
-                max_length=self.max_length,
-                pad_to_multiple_of=self.pad_to_multiple_of,
-                return_tensors="pt",
-            )
-            if model_args.do_mlm:
-                batch["mlm_input_ids"], batch["mlm_labels"] = self.mask_tokens(batch["input_ids"])
-
-            batch = {k: batch[k].view(bs, num_sent, -1) if k in special_keys else batch[k].view(bs, num_sent, -1)[:, 0] for k in batch}
-
-            if "label" in batch:
-                batch["labels"] = batch["label"]
-                del batch["label"]
-            if "label_ids" in batch:
-                batch["labels"] = batch["label_ids"]
-                del batch["label_ids"]
-
-            return batch
-        
-
-    data_collator = default_data_collator if FLAGS.pad_to_max_length else OurDataCollatorWithPadding(tokenizer)
-    
-    
+        )    
     
     
     # Important: Remember to shuffle your training data!!! This makes a huge difference!!!
@@ -200,7 +150,7 @@ if __name__ == '__main__':
         sentences,
         add_special_tokens=True,
         return_tensors='pt',
-        max_length=512,
+        max_length=FLAGS.pad_to_max_length,
         padding='longest',
         truncation=True
     )
