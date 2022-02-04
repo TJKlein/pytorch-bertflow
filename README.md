@@ -1,4 +1,4 @@
-# Pytorch Bertflow Reimplentation
+# Pytorch Bertflow Reimplementation
 
 Based on the code from [repository](https://github.com/UKPLab/pytorch-bertflow).
 
