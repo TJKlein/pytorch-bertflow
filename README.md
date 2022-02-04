@@ -1,6 +1,6 @@
 # PyTorch BERT-flow Reimplementation
 
-PyTorch BERT-flow implementation based on the code from [repository](https://github.com/UKPLab/pytorch-bertflow). Reimplementation allows to reproduce the results from original [repository](https://github.com/bohanli/BERT-flow).
+Simple and lean PyTorch BERT-flow implementation based on the code from [repository](https://github.com/UKPLab/pytorch-bertflow). Reimplementation allows to reproduce the results from original [repository](https://github.com/bohanli/BERT-flow).
 
 Changes:
 * Added batching
