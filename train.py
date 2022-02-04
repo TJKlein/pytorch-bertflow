@@ -1,3 +1,11 @@
+#import senteval
+import sys
+PATH_TO_SENTEVAL = './SentEval'
+PATH_TO_DATA = './SentEval/data'
+
+# Import SentEval
+sys.path.insert(0, PATH_TO_SENTEVAL)
+import senteval
 from tflow_utils import TransformerGlow, AdamWeightDecayOptimizer
 from transformers import AutoTokenizer
 import argparse
@@ -9,6 +17,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler
 import transformers
 from tqdm import tqdm, trange
+import numpy as np
 from transformers import (
     CONFIG_MAPPING,
     MODEL_FOR_MASKED_LM_MAPPING,
@@ -29,6 +38,9 @@ from transformers import (
     RobertaModel
 )
 
+PATH_TO_SENTEVAL = './SentEval'
+PATH_TO_DATA = './SentEval/data'
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--no_cuda", action='store_true',
                     help="Avoid using CUDA when available")
@@ -44,9 +56,11 @@ parser.add_argument('--num_train_epochs', type=int, default=3,
 parser.add_argument('--per_device_train_batch_size', type=int, default=64, help='Batch size for training')
 parser.add_argument('--description', type=str, help='Experiment description')
 parser.add_argument('--tags', type=str, help='Annotation tags for wandb, comma separated')
+parser.add_argument('--eval_steps', type=int, default=250, help='Frequency of model selection evaluation')
+parser.add_argument('--metric_for_best_model', type=str, choices=['sickr_spearman','stsb_spearman'], default='stsb_spearman', help='Metric for model selection')
 parser.add_argument("--pooler", type=str,
                         choices=['mean', 'max', 'cls', 'first-last-avg'],
-                        default='first',
+                    default='first-last-avg',
                         help="Which pooler to use")
 parser.add_argument("--local_rank",
                     type=int,
@@ -176,16 +190,100 @@ if __name__ == '__main__':
     bertflow.to(device)
     bertflow.train()
 
+    # variables for monitoring
+    global_steps = 0
+    best_metric = None
+    # trai nthe model 
     for it in trange(int(FLAGS.num_train_epochs), desc="Epoch"):
 
         for step, batch in enumerate(tqdm(train_dataloader)):
+            global_steps = global_steps + 1
             input_ids, attention_mask = (tens.to(device) for tens in batch)
 
             z, loss = bertflow(input_ids,attention_mask, return_loss=True)  # Here z is the sentence embedding
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            wandb.log({'loss': loss.item()})
 
-    bertflow.save_pretrained(FLAGS.output_dir)  # Save model
-    bertflow = TransformerGlow.from_pretrained(FLAGS.output_dir)  # Load model
-    tokenizer.save_pretrained(FLAGS.output_dir)
+            if global_steps % FLAGS.eval_steps == 1 and global_steps > 1:
+
+                params = {'task_path': PATH_TO_DATA,
+                          'usepytorch': True, 'kfold': 5}
+                params['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 128,
+                                'tenacity': 3, 'epoch_size': 2}
+
+                # SentEval prepare and batcher
+                def prepare(params, samples):
+                    return
+                def batcher(params, batch, max_length=None):
+                    # Handle rare token encoding issues in the dataset
+                    if len(batch) >= 1 and len(batch[0]) >= 1 and isinstance(batch[0][0], bytes):
+                        batch = [[word.decode('utf-8') for word in s] for s in batch]
+
+                    sentences = [' '.join(s) for s in batch]
+
+                    # Tokenization
+                    if max_length is not None:
+                        batch = tokenizer.batch_encode_plus(
+                            sentences,
+                            return_tensors='pt',
+                            padding=True,
+                            max_length=max_length,
+                            truncation=True
+                        )
+                    else:
+                        batch = tokenizer.batch_encode_plus(
+                            sentences,
+                            return_tensors='pt',
+                            padding=True,
+                        )
+
+                    # Move to the correct device
+                    for k in batch:
+                        batch[k] = batch[k].to(device)
+
+                    # Get raw embeddings
+                    with torch.no_grad():
+                        del batch['token_type_ids']
+                        z = bertflow(**batch)
+                        return z.cpu()
+
+                results = {}
+
+                for task in ['STSBenchmark', 'SICKRelatedness']:
+                    se = senteval.engine.SE(params, batcher, prepare)
+                    result = se.eval(task)
+                    results[task] = result
+
+                stsb_spearman = results['STSBenchmark']['dev']['spearman'][0]
+                sickr_spearman = results['SICKRelatedness']['dev']['spearman'][0]
+                wandb.log({"eval_stsb_spearman": stsb_spearman,
+                          "eval_sickr_spearman": sickr_spearman, "eval_avg_sts": (stsb_spearman + sickr_spearman) / 2})
+                metrics = {"eval_stsb_spearman": stsb_spearman,
+                          "eval_sickr_spearman": sickr_spearman, "eval_avg_sts": (stsb_spearman + sickr_spearman) / 2}
+
+                # Determine the new best metric / best model checkpoint
+                if metrics is not None and FLAGS.metric_for_best_model is not None:
+                    metric_to_check = FLAGS.metric_for_best_model
+                    if not metric_to_check.startswith("eval_"):
+                        metric_to_check = f"eval_{metric_to_check}"
+                    metric_value = metrics[metric_to_check]
+
+                    operator = np.greater
+                    if (
+                        best_metric is None
+                        or operator(metric_value, best_metric)
+                    ):
+                        # update the best metric
+                        best_metric = metric_value
+
+                        # save the best (intermediate) model
+                        bertflow.save_pretrained(
+                            FLAGS.output_dir)  # Save model
+                        #bertflow = TransformerGlow.from_pretrained(FLAGS.output_dir)  # Load model
+                        tokenizer.save_pretrained(FLAGS.output_dir)
+
+        
+
+   
