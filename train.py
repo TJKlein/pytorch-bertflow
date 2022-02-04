@@ -1,8 +1,8 @@
 #import senteval
+import random
 import sys
 PATH_TO_SENTEVAL = './SentEval'
 PATH_TO_DATA = './SentEval/data'
-
 # Import SentEval
 sys.path.insert(0, PATH_TO_SENTEVAL)
 import senteval
@@ -58,6 +58,7 @@ parser.add_argument('--description', type=str, help='Experiment description')
 parser.add_argument('--tags', type=str, help='Annotation tags for wandb, comma separated')
 parser.add_argument('--eval_steps', type=int, default=250, help='Frequency of model selection evaluation')
 parser.add_argument('--metric_for_best_model', type=str, choices=['sickr_spearman','stsb_spearman'], default='stsb_spearman', help='Metric for model selection')
+parser.add_argument('--seed', type=int, default=48, help='Random seed for reproducability')
 parser.add_argument("--pooler", type=str,
                         choices=['mean', 'max', 'cls', 'first-last-avg'],
                     default='first-last-avg',
@@ -67,6 +68,20 @@ parser.add_argument("--local_rank",
                     default=-1,
                     help="local_rank for distributed training on gpus")
 
+
+def set_seed(seed: int):
+    """
+    Helper function for reproducible behavior to set the seed in ``random``, ``numpy``, ``torch`` and/or ``tf`` (if
+    installed).
+
+    Args:
+        seed (:obj:`int`): The seed to set.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 if __name__ == '__main__':
     
@@ -109,6 +124,8 @@ if __name__ == '__main__':
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         FLAGS.n_gpu = torch.cuda.device_count()
     
+    # make sure we can make all the experiment results reproducible
+    set_seed(FLAGS.seed)
     bertflow = TransformerGlow(FLAGS.model_name_or_path, pooling=FLAGS.pooler)  # pooling could be 'mean', 'max', 'cls' or 'first-last-avg' (mean pooling over the first and the last layers)
     tokenizer = AutoTokenizer.from_pretrained(FLAGS.model_name_or_path)
     no_decay = ["bias", "LayerNorm.weight"]
