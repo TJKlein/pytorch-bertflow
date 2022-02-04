@@ -5,7 +5,7 @@ Simple and lean PyTorch BERT-flow implementation based on the code from [reposit
 Changes:
 * Added batching
 * Added monitoring (Weights and Biases)
-* Added evaluation script
+* Added evaluation ([SentEval](https://github.com/facebookresearch/SentEval)) script
 
 ## Usage:
 
@@ -19,7 +19,7 @@ python train.py --model_name_or_path bert-base-uncased --train_file text_file.tx
 
 ### Evaluation
 
-Running evaluation on STS, SICK-R, simply provide the path of the model trained in the previous script to the evaluation shells script:
+Running evaluation on [SentEval](https://github.com/facebookresearch/SentEval)), simply provide the path of the model trained in the previous script to the evaluation shells script:
 
 ```
 sh eval.sh <path to BERT-flow model>
