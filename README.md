@@ -1,5 +1,8 @@
-# Pytorch Bertflow Reimplementation
+# Pytorch BERTflow Reimplementation
 
-Based on the code from [repository](https://github.com/UKPLab/pytorch-bertflow).
+BERTflow implementation based on the code from [repository](https://github.com/UKPLab/pytorch-bertflow).
 
-Added batching and monitoring (Weights and Biases) to the training routine.
+Changes:
+* Added batching
+* Added monitoring (Weights and Biases)
+* Added evaluation script
