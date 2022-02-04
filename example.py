@@ -3,9 +3,12 @@ from transformers import AutoTokenizer
 import argparse
 import os
 import wandb
-import datasets
-
+from datasets import load_dataset
+import sys
+import torch
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler
 import transformers
+from tqdm import tqdm, trange
 from transformers import (
     CONFIG_MAPPING,
     MODEL_FOR_MASKED_LM_MAPPING,
@@ -26,18 +29,26 @@ from transformers import (
     RobertaModel
 )
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--no_cuda", action='store_true',
+                    help="Avoid using CUDA when available")
 parser.add_argument('--model_name_or_path', required=True, type=str, help='Mode for filename to Huggingface model')
 parser.add_argument('--train_file', type=str, help='Input training file (text)')
 parser.add_argument('--output_dir', required=True, type=str, help='Path where result should be stored')
 parser.add_argument('--preprocessing_num_workers', type=int, default=1, help='Number of worker threads for processing data')
-parser.add_argument('--overwrite_cache', type=bool, defaule=False, help='Indicate whether cached features should be overwritten')
-parser.add_argument('--pad_to_max_length', type=bool, default=False, help='Indicate whether tokens sequence should be padded')
+parser.add_argument('--overwrite_cache', type=bool, default=False, help='Indicate whether cached features should be overwritten')
+parser.add_argument('--pad_to_max_length', type=bool, default=True, help='Indicate whether tokens sequence should be padded')
 parser.add_argument('--max_seq_length', type=int, default=32, help='Input max sequence length in tokens')
+parser.add_argument('--num_train_epochs', type=int, default=3,
+                    help='Number of trainin epochs')
+parser.add_argument('--per_device_train_batch_size', type=int, default=64, help='Batch size for training')
 parser.add_argument('--description', type=str, help='Experiment description')
 parser.add_argument('--tags', type=str, help='Annotation tags for wandb, comma separated')
 
-
-parser = argparse.ArgumentParser()
+parser.add_argument("--local_rank",
+                    type=int,
+                    default=-1,
+                    help="local_rank for distributed training on gpus")
 
 
 if __name__ == '__main__':
@@ -50,7 +61,7 @@ if __name__ == '__main__':
         FLAGS.tags = [item for item in FLAGS.tags.split(',')]
 
     if not(FLAGS.tags is None):
-        wandb.init(project=FLAGS.description, tags=data_args.tags)
+        wandb.init(project=FLAGS.description, tags=FLAGS.tags)
 
     else:
         wandb.init(project=FLAGS.description)
@@ -75,6 +86,11 @@ if __name__ == '__main__':
             f"Output directory ({FLAGS.output_dir}) already exists and is not empty."
             "Use --overwrite_output_dir to overcome."
         )
+
+
+    if FLAGS.local_rank == -1 or FLAGS.no_cuda:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        FLAGS.n_gpu = torch.cuda.device_count()
     
     bertflow = TransformerGlow(FLAGS.model_name_or_path, pooling='first-last-avg')  # pooling could be 'mean', 'max', 'cls' or 'first-last-avg' (mean pooling over the first and the last layers)
     tokenizer = AutoTokenizer.from_pretrained(FLAGS.model_name_or_path)
@@ -97,8 +113,7 @@ if __name__ == '__main__':
         eps=1e-6,
     )
 
-    extension = os.path.splitext(FLAGS.train_file)[1]
-    datasets = load_dataset(extension, data_files=FLAGS.train_file, cache_dir="./data/")
+    datasets = load_dataset(path = os.path.split(os.path.abspath(FLAGS.train_file))[0], data_files=os.path.split(os.path.abspath(FLAGS.train_file))[1], cache_dir="./data/")
     column_names = datasets["train"].column_names
 
     
@@ -125,7 +140,7 @@ if __name__ == '__main__':
         
         sent_features = tokenizer(
             sentences,
-            max_length=data_args.max_seq_length,
+            max_length=FLAGS.max_seq_length,
             truncation=True,
             padding="max_length" if FLAGS.pad_to_max_length else False,
         )
@@ -142,23 +157,31 @@ if __name__ == '__main__':
             remove_columns=column_names,
             load_from_cache_file=not FLAGS.overwrite_cache,
         )    
-    
-    
-    # Important: Remember to shuffle your training data!!! This makes a huge difference!!!
-    sentences = ['This is sentence A.', 'And this is sentence B.']  # Please replace this with your datasets (single sentences).
-    model_inputs = tokenizer(
-        sentences,
-        add_special_tokens=True,
-        return_tensors='pt',
-        max_length=FLAGS.pad_to_max_length,
-        padding='longest',
-        truncation=True
-    )
-    bertflow.train()
-    z, loss = bertflow(model_inputs['input_ids'], model_inputs['attention_mask'], return_loss=True)  # Here z is the sentence embedding
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
 
-    bertflow.save_pretrained('output')  # Save model
-    bertflow = TransformerGlow.from_pretrained('output')  # Load model
+    all_input_ids = torch.tensor(
+        [f for f in train_dataset['input_ids']], dtype=torch.long)
+    all_attention_mask = torch.tensor(
+        [f for f in train_dataset['attention_mask']], dtype=torch.long)
+    
+    train_data = TensorDataset(all_input_ids, all_attention_mask)
+
+    train_sampler = RandomSampler(train_data)
+
+    train_dataloader = DataLoader(
+        train_data, sampler=train_sampler, batch_size=FLAGS.per_device_train_batch_size)
+    
+    bertflow.to(device)
+    bertflow.train()
+
+    for it in trange(int(FLAGS.num_train_epochs), desc="Epoch"):
+
+        for step, batch in enumerate(tqdm(train_dataloader)):
+            input_ids, attention_mask = (tens.to(device) for tens in batch)
+
+            z, loss = bertflow(input_ids,attention_mask, return_loss=True)  # Here z is the sentence embedding
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    bertflow.save_pretrained(FLAGS.output_dir)  # Save model
+    bertflow = TransformerGlow.from_pretrained(FLAGS.output_dir)  # Load model
