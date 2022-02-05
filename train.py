@@ -51,6 +51,8 @@ parser.add_argument('--preprocessing_num_workers', type=int, default=1, help='Nu
 parser.add_argument('--overwrite_cache', type=bool, default=False, help='Indicate whether cached features should be overwritten')
 parser.add_argument('--pad_to_max_length', type=bool, default=True, help='Indicate whether tokens sequence should be padded')
 parser.add_argument('--max_seq_length', type=int, default=32, help='Input max sequence length in tokens')
+parser.add_argument('--learning_rate', type=float,
+                    default=1e-3, help='SGD learning rate')
 parser.add_argument('--num_train_epochs', type=int, default=3,
                     help='Number of trainin epochs')
 parser.add_argument('--per_device_train_batch_size', type=int, default=64, help='Batch size for training')
@@ -143,7 +145,7 @@ if __name__ == '__main__':
     ]
     optimizer = AdamWeightDecayOptimizer(
         params=optimizer_grouped_parameters, 
-        lr=1e-3, 
+        lr=FLAGS.learning_rate, 
         eps=1e-6,
     )
 
@@ -213,7 +215,7 @@ if __name__ == '__main__':
     # trai nthe model 
     for it in trange(int(FLAGS.num_train_epochs), desc="Epoch"):
 
-        for step, batch in enumerate(tqdm(train_dataloader)):
+        for step, batch in enumerate((train_dataloader)):
             global_steps = global_steps + 1
             input_ids, attention_mask = (tens.to(device) for tens in batch)
 
