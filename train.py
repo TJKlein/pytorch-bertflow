@@ -51,6 +51,7 @@ parser.add_argument('--preprocessing_num_workers', type=int, default=1, help='Nu
 parser.add_argument('--overwrite_cache', type=bool, default=False, help='Indicate whether cached features should be overwritten')
 parser.add_argument('--pad_to_max_length', type=bool, default=True, help='Indicate whether tokens sequence should be padded')
 parser.add_argument('--max_seq_length', type=int, default=32, help='Input max sequence length in tokens')
+parser.add_argument('--overwrite_output_dir', type=bool, default=True, help="If data in output directory should be overwritten if already existing.")
 parser.add_argument('--learning_rate', type=float,
                     default=1e-3, help='SGD learning rate')
 parser.add_argument('--num_train_epochs', type=int, default=3,
